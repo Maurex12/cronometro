@@ -74,6 +74,7 @@ SPDX-License-Identifier: MIT
 
 static const char * TAG = "BOTONES";
 volatile bool cronometro_activo = false;
+volatile bool reiniciar_display = false;
 volatile uint16_t cuenta_cronometro = 0;
 
 /* === Private data type declarations =============================================================================== */
@@ -147,6 +148,7 @@ void tarea_escaneo_botones(void * pvParameters) {
             case BOTON_TEC2:
                 if (!cronometro_activo) {
                     cuenta_cronometro = 0;
+                    reiniciar_display = true;
                 }
                 ESP_LOGI(TAG, "Botón 2 presionado: cronómetro en 0");
                 break;
@@ -206,6 +208,13 @@ void tarea_display(void * pvParameters) {
     int unidades_segundos = 0;
 
     while (1) {
+        if (reiniciar_display) {
+            DibujarDigito(decenas, 0, 0);
+            DibujarDigito(unidades, 0, 0);
+            reiniciar_display = false;
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+
         if (cronometro_activo) {
             cuenta_cronometro++;
 
