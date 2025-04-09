@@ -150,7 +150,7 @@ void tarea_escaneo_botones(void * pvParameters) {
                     cuenta_cronometro = 0;
                     reiniciar_display = true;
                 }
-                ESP_LOGI(TAG, "Botón 2 presionado: cronómetro en 0");
+                ESP_LOGI(TAG, "Botón 2 presionado: cronómetro RESET");
                 break;
             case BOTON_TEC3:
                 ESP_LOGI(TAG, "Se presiono el boton 3");
@@ -198,35 +198,55 @@ void tarea_display(void * pvParameters) {
 
     panel_t decenas = paneles[0];
     panel_t unidades = paneles[1];
+    panel_t decimas = paneles[2];
 
-    // Variables para utilizar DelayUntil()
-    const TickType_t tiempo = pdMS_TO_TICKS(1000);
+    // Variables para utilizar DelayUntil() y contar cada 100 milisegundo
+    const TickType_t tiempo = pdMS_TO_TICKS(100);
     TickType_t last_time = xTaskGetTickCount();
 
-    // Variables para los dígitos del cronómetro
-    int decenas_segundos = 0;
-    int unidades_segundos = 0;
+    /* Variables para dibujar los dígitos solomente si cambian */
+    int decenas_segundos_anterior = -1;
+    int unidades_segundos_anterior = -1;
+    int decimas_segundos_anterior = -1;
+
+    // Cuenta máxima de 60 segundos
+    const int cuenta_maxima = 600;
 
     while (1) {
         if (reiniciar_display) {
             DibujarDigito(decenas, 0, 0);
             DibujarDigito(unidades, 0, 0);
+            DibujarDigito(decimas, 0, 0);
             reiniciar_display = false;
-            vTaskDelay(pdMS_TO_TICKS(200));
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
 
         if (cronometro_activo) {
             cuenta_cronometro++;
 
-            if (cuenta_cronometro >= 60) {
+            if (cuenta_cronometro >= cuenta_maxima) {
                 cuenta_cronometro = 0;
             }
 
-            decenas_segundos = (cuenta_cronometro / 10) % 10;
-            unidades_segundos = (cuenta_cronometro % 10);
+            // Variables para los dígitos del cronómetro
+            int decenas_segundos = (cuenta_cronometro / 100) % 10;
+            int unidades_segundos = (cuenta_cronometro / 10) % 10;
+            int decimas_segundos = (cuenta_cronometro % 10);
 
-            DibujarDigito(decenas, 0, decenas_segundos);
-            DibujarDigito(unidades, 0, unidades_segundos);
+            if (decenas_segundos_anterior != decenas_segundos) {
+                DibujarDigito(decenas, 0, decenas_segundos);
+                decenas_segundos_anterior = decenas_segundos;
+            }
+
+            if (unidades_segundos_anterior != unidades_segundos) {
+                DibujarDigito(unidades, 0, unidades_segundos);
+                unidades_segundos_anterior = unidades_segundos;
+            }
+
+            if (decimas_segundos_anterior != decimas_segundos) {
+                DibujarDigito(decimas, 0, decimas_segundos);
+                decimas_segundos_anterior = decimas_segundos;
+            }
         }
 
         vTaskDelayUntil(&last_time, tiempo);
@@ -279,17 +299,24 @@ void app_main(void) {
         CrearPanel(30, 60, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
     panel_t p_unidades =
         CrearPanel(95, 60, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t p_decimas =
+        CrearPanel(170, 60, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
 
     DibujarDigito(decenas_segundos_inicial, 0, 0);
     DibujarDigito(decenas_segundos_inicial, 1, 0);
 
+    /*
     ILI9341DrawFilledCircle(160, 90, 5, DIGITO_ENCENDIDO);
     ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
+
+    USAR PARA EL RELOJ */
+
+    ILI9341DrawFilledCircle(160, 150, 5, DIGITO_ENCENDIDO);
 
     DibujarDigito(unidades_segundos_inicial, 0, 0);
     DibujarDigito(unidades_segundos_inicial, 1, 0);
 
-    panel_t paneles_cronometro[] = {p_decenas, p_unidades};
+    panel_t paneles_cronometro[] = {p_decenas, p_unidades, p_decimas};
 
     xTaskCreate(tarea_display, "Tarea cronómetro", 2048, (void *)paneles_cronometro, 6, NULL);
 }

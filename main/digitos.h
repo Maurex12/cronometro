@@ -38,7 +38,7 @@ extern "C" {
 
 //! @brief Cantidad máxima de paneles que se pueden crear
 #ifndef MAXIMO_PANELES
-#define MAXIMO_PANELES 4
+#define MAXIMO_PANELES 6
 #endif
 
 //! @brief Cantidad máxima de digitos que se pueden mostrar en un panel
