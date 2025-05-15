@@ -54,61 +54,46 @@ SPDX-License-Identifier: MIT
 #include "driver/gpio.h"
 #include "esp_err.h"
 
-/* === Macros definitions =========================================================================================== */
+#define DIGITO_ANCHO             60
+#define DIGITO_ALTO              100
+#define DIGITO_ENCENDIDO         ILI9341_RED
+#define DIGITO_APAGADO           0x0000
+#define DIGITO_FONDO             ILI9341_BLACK
+#define DIGITO_ENCENDIDO_PARCIAL ILI9341_LIGHTGREY
 
-#define DIGITO_ANCHO          60
+#define BOTON1                   32
+#define BOTON2                   35
+#define BOTON3                   34
 
-#define DIGITO_ALTO           100
+#define EVENT_BOTON1             (1 << 0)
+#define EVENT_BOTON2             (1 << 1)
+#define EVENT_BOTON3             (1 << 2)
 
-#define DIGITO_ENCENDIDO      ILI9341_RED
+#define LED_VERDE                GPIO_NUM_4
+#define LED_ROJO                 GPIO_NUM_2
 
-#define DIGITO_APAGADO        0x0000 // 1800
+#define CUENTA_MAXIMA            600
+#define MAX_TIEMPOS_PARCIALES    2
 
-#define DIGITO_FONDO          ILI9341_BLACK
+static const char * TAG = "CRONOMETRO";
 
-// Defino GPIOs para los botones
-#define BOTON1                32
-#define BOTON2                35
-#define BOTON3                34
-
-// Defino los bits para los eventos de los botones
-#define EVENT_BOTON1          (1 << 0)
-#define EVENT_BOTON2          (1 << 1)
-#define EVENT_BOTON3          (1 << 2)
-
-// Constantes para los botones
-#define CANT_MAX_BOTONES      3
-#define BOTON1_INDEX          0
-#define BOTON2_INDEX          1
-#define BOTON3_INDEX          2
-
-// Defino GPIOs para los leds
-#define LED_VERDE             GPIO_NUM_4
-#define LED_ROJO              GPIO_NUM_2
-
-#define TIEMPOS_PARCIALES_MAX 2
-
-static const char * TAG = "BOTONES";
+/* === Private data type declarations =============================================================================== */
 
 typedef struct {
-    bool cronometro_activo;
-    bool reiniciar_display;
-    uint16_t cuenta_cronometro;
+    volatile bool cronometro_activo;
+    volatile bool reiniciar_display;
+    volatile uint16_t cuenta_cronometro;
     EventGroupHandle_t botones_event;
     QueueHandle_t cola_tiempos_parciales;
     SemaphoreHandle_t mutex_tiempos;
 } app_data_t;
 
-/* === Private data type declarations =============================================================================== */
-typedef enum { BOTON_NINGUNO = 0, BOTON_TEC1, BOTON_TEC2, BOTON_TEC3 } boton_t;
-
 esp_err_t init_botones(void) {
-    gpio_config_t boton = {.pin_bit_mask = ((1ULL << BOTON1) | (1ULL << BOTON2) | (1ULL << BOTON3)),
+    gpio_config_t boton = {.pin_bit_mask = (1ULL << BOTON1) | (1ULL << BOTON2) | (1ULL << BOTON3),
                            .mode = GPIO_MODE_INPUT,
                            .pull_up_en = GPIO_PULLUP_ENABLE,
                            .pull_down_en = GPIO_PULLDOWN_DISABLE,
                            .intr_type = GPIO_INTR_DISABLE};
-
     return gpio_config(&boton);
 }
 
@@ -116,7 +101,7 @@ esp_err_t init_leds(void) {
     gpio_reset_pin(LED_ROJO);
     gpio_reset_pin(LED_VERDE);
 
-    gpio_config_t leds = {.pin_bit_mask = ((1ULL << LED_ROJO) | (1ULL << LED_VERDE)),
+    gpio_config_t leds = {.pin_bit_mask = (1ULL << LED_ROJO) | (1ULL << LED_VERDE),
                           .mode = GPIO_MODE_OUTPUT,
                           .pull_up_en = GPIO_PULLUP_DISABLE,
                           .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -124,48 +109,28 @@ esp_err_t init_leds(void) {
 
     gpio_set_level(LED_VERDE, 1);
     gpio_set_level(LED_ROJO, 0);
-
     return gpio_config(&leds);
 }
 
 void tarea_escaneo_botones(void * pvParameters) {
     app_data_t * ctx = (app_data_t *)pvParameters;
-
-    int estado_previo[CANT_MAX_BOTONES] = {1, 1, 1}; // 1 = botón no presionado
-    gpio_num_t pines_botones[CANT_MAX_BOTONES] = {BOTON1, BOTON2, BOTON3};
+    int estado_previo[3] = {1, 1, 1};
+    gpio_num_t pines[3] = {BOTON1, BOTON2, BOTON3};
 
     while (1) {
-        for (int i = 0; i < CANT_MAX_BOTONES; i++) {
-            int estado_actual = gpio_get_level(pines_botones[i]);
-            vTaskDelay(pdMS_TO_TICKS(20)); // Antirrebote
-            int estado_confirmado = gpio_get_level(pines_botones[i]);
+        for (int i = 0; i < 3; i++) {
+            int estado_actual = gpio_get_level(pines[i]);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            int estado_confirmado = gpio_get_level(pines[i]);
 
-            if (estado_actual == estado_confirmado) {
-                if (estado_confirmado == 0 && estado_previo[i] == 1) {
-                    // Se detectó una pulsación nueva
-                    switch (i) {
-                    case BOTON1_INDEX:
-                        xEventGroupSetBits(ctx->botones_event, EVENT_BOTON1);
-                        break;
-                    case BOTON2_INDEX:
-                        xEventGroupSetBits(ctx->botones_event, EVENT_BOTON2);
-                        break;
-                    case BOTON3_INDEX:
-                        xEventGroupSetBits(ctx->botones_event, EVENT_BOTON3);
-                        break;
-                    }
-
-                    estado_previo[i] = 0;
-                }
-
-                // Se suelta el botón, actualiza el estado
-                else if (estado_confirmado == 1) {
-                    estado_previo[i] = 1;
-                }
+            if (estado_actual == estado_confirmado && estado_confirmado == 0 && estado_previo[i] == 1) {
+                xEventGroupSetBits(ctx->botones_event, (1 << i));
+                estado_previo[i] = 0;
             }
+            if (estado_confirmado == 1)
+                estado_previo[i] = 1;
         }
-
-        vTaskDelay(pdMS_TO_TICKS(30)); // Tiempo entre escaneos
+        vTaskDelay(pdMS_TO_TICKS(30));
     }
 }
 
@@ -181,7 +146,7 @@ void tarea_eventos_botones(void * pvParameters) {
             xSemaphoreTake(ctx->mutex_tiempos, portMAX_DELAY);
             ctx->cronometro_activo = !ctx->cronometro_activo;
             xSemaphoreGive(ctx->mutex_tiempos);
-            ESP_LOGI("EVENTO", "botón 1 presionado: cronómetro %s", ctx->cronometro_activo ? "activo" : "detenido");
+            ESP_LOGI(TAG, "Botón 1: Cronómetro %s", ctx->cronometro_activo ? "activo" : "detenido");
         }
 
         if (eventos & EVENT_BOTON2) {
@@ -189,38 +154,48 @@ void tarea_eventos_botones(void * pvParameters) {
             if (!ctx->cronometro_activo) {
                 ctx->cuenta_cronometro = 0;
                 ctx->reiniciar_display = true;
-                ESP_LOGI("EVENTO", "botón 2 presionado: se reinició el cronómetro");
+                xQueueReset(ctx->cola_tiempos_parciales);
+                ESP_LOGI(TAG, "Botón 2: Cronómetro reiniciado");
             }
             xSemaphoreGive(ctx->mutex_tiempos);
         }
 
         if (eventos & EVENT_BOTON3) {
-            ESP_LOGI("EVENTO", "botón 3 presionado: tiempo parcial capturado");
+            xSemaphoreTake(ctx->mutex_tiempos, portMAX_DELAY);
+            uint16_t tiempo_parcial = ctx->cuenta_cronometro;
+            xSemaphoreGive(ctx->mutex_tiempos);
+
+            if (uxQueueSpacesAvailable(ctx->cola_tiempos_parciales) == 0) {
+                uint16_t descarte;
+                xQueueReceive(ctx->cola_tiempos_parciales, &descarte, 0);
+            }
+            xQueueSend(ctx->cola_tiempos_parciales, &tiempo_parcial, 0);
+            ESP_LOGI(TAG, "Botón 3: Tiempo parcial capturado %d", tiempo_parcial);
         }
     }
 }
 
 void tarea_leds(void * pvParameters) {
     app_data_t * ctx = (app_data_t *)pvParameters;
-    // gpio_set_direction(LED_ROJO, GPIO_MODE_OUTPUT);
-    // gpio_set_direction(LED_VERDE, GPIO_MODE_OUTPUT);
+    bool ultimo_estado = false;
 
     while (1) {
         xSemaphoreTake(ctx->mutex_tiempos, portMAX_DELAY);
         bool activo = ctx->cronometro_activo;
         xSemaphoreGive(ctx->mutex_tiempos);
 
-        if (activo) {
-            gpio_set_level(LED_ROJO, 0);
-            gpio_set_level(LED_VERDE, 1);
-            vTaskDelay(pdMS_TO_TICKS(250));
-            gpio_set_level(LED_VERDE, 0);
-            vTaskDelay(pdMS_TO_TICKS(250));
+        if (activo != ultimo_estado) {
+            gpio_set_level(LED_VERDE, activo ? 1 : 0);
+            gpio_set_level(LED_ROJO, activo ? 0 : 1);
+            ultimo_estado = activo;
         }
 
-        else {
-            gpio_set_level(LED_ROJO, 1);
+        if (activo) {
+            vTaskDelay(pdMS_TO_TICKS(250));
             gpio_set_level(LED_VERDE, 0);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            gpio_set_level(LED_VERDE, 1);
+        } else {
             vTaskDelay(pdMS_TO_TICKS(200));
         }
     }
@@ -230,23 +205,25 @@ void tarea_display(void * pvParameters) {
     app_data_t * ctx = (app_data_t *)pvParameters;
 
     panel_t p_decenas =
-        CrearPanel(30, 60, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+        CrearPanel(30, 40, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
     panel_t p_unidades =
-        CrearPanel(95, 60, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+        CrearPanel(95, 40, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
     panel_t p_decimas =
-        CrearPanel(170, 60, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+        CrearPanel(170, 40, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
 
-    // Variables para utilizar DelayUntil() y contar cada 100 milisegundo
+    panel_t p_parcial[MAX_TIEMPOS_PARCIALES];
+    for (int i = 0; i < MAX_TIEMPOS_PARCIALES; i++) {
+        p_parcial[i] = CrearPanel(30, 140 + (i * 40), 4, DIGITO_ALTO / 2, DIGITO_ANCHO / 2, DIGITO_ENCENDIDO_PARCIAL,
+                                  DIGITO_APAGADO, DIGITO_FONDO);
+    }
+
     const TickType_t tiempo = pdMS_TO_TICKS(100);
     TickType_t last_time = xTaskGetTickCount();
 
-    /* Variables para dibujar los dígitos solamente si cambian */
+    /* Variables para dibujar los dígitos solomente si cambian */
     int decenas_segundos_anterior = -1;
     int unidades_segundos_anterior = -1;
     int decimas_segundos_anterior = -1;
-
-    // Cuenta máxima de 60 segundos
-    const int cuenta_maxima = 600;
 
     while (1) {
         xSemaphoreTake(ctx->mutex_tiempos, portMAX_DELAY);
@@ -254,102 +231,90 @@ void tarea_display(void * pvParameters) {
             DibujarDigito(p_decenas, 0, 0);
             DibujarDigito(p_unidades, 0, 0);
             DibujarDigito(p_decimas, 0, 0);
+            for (int i = 0; i < MAX_TIEMPOS_PARCIALES; i++) {
+                DibujarDigito(p_parcial[i], 0, 0);
+                DibujarDigito(p_parcial[i], 1, 0);
+                DibujarDigito(p_parcial[i], 2, 0);
+            }
             ctx->reiniciar_display = false;
-            // vTaskDelay(pdMS_TO_TICKS(100));
         }
 
         if (ctx->cronometro_activo) {
             ctx->cuenta_cronometro++;
-            if (ctx->cuenta_cronometro >= cuenta_maxima) {
+            if (ctx->cuenta_cronometro >= CUENTA_MAXIMA) // 59.9 segundos como máximo
                 ctx->cuenta_cronometro = 0;
-            }
+        }
+        uint16_t cuenta = ctx->cuenta_cronometro;
+        xSemaphoreGive(ctx->mutex_tiempos);
 
-            // Variables para los dígitos del cronómetro
-            int decenas_segundos = (ctx->cuenta_cronometro / 100) % 10;
-            int unidades_segundos = (ctx->cuenta_cronometro / 10) % 10;
-            int decimas_segundos = (ctx->cuenta_cronometro % 10);
+        int decenas_segundos = (cuenta / 100) % 10;
+        int unidades_segundos = (cuenta / 10) % 10;
+        int decimas_segundos = cuenta % 10;
 
-            if (decenas_segundos_anterior != decenas_segundos) {
-                DibujarDigito(p_decenas, 0, decenas_segundos);
-                decenas_segundos_anterior = decenas_segundos;
-            }
+        if (decenas_segundos_anterior != decenas_segundos) {
+            DibujarDigito(p_decenas, 0, decenas_segundos);
+            decenas_segundos_anterior = decenas_segundos;
+        }
 
-            if (unidades_segundos_anterior != unidades_segundos) {
-                DibujarDigito(p_unidades, 0, unidades_segundos);
-                unidades_segundos_anterior = unidades_segundos;
-            }
+        if (unidades_segundos_anterior != unidades_segundos) {
+            DibujarDigito(p_unidades, 0, unidades_segundos);
+            unidades_segundos_anterior = unidades_segundos;
+        }
 
-            if (decimas_segundos_anterior != decimas_segundos) {
-                DibujarDigito(p_decimas, 0, decimas_segundos);
-                decimas_segundos_anterior = decimas_segundos;
+        ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
+
+        if (decimas_segundos_anterior != decimas_segundos) {
+            DibujarDigito(p_decimas, 0, decimas_segundos);
+            decimas_segundos_anterior = decenas_segundos;
+        }
+
+        uint16_t tiempos_parciales[MAX_TIEMPOS_PARCIALES] = {0};
+        int cantidad = uxQueueMessagesWaiting(ctx->cola_tiempos_parciales);
+
+        for (int i = 0; i < cantidad; i++) {
+            xQueueReceive(ctx->cola_tiempos_parciales, &tiempos_parciales[i], 0);
+        }
+
+        for (int i = 0; i < cantidad; i++) {
+            xQueueSend(ctx->cola_tiempos_parciales, &tiempos_parciales[i], 0);
+        }
+
+        for (int i = 0; i < MAX_TIEMPOS_PARCIALES; i++) {
+            if (i < cantidad) {
+                int t = tiempos_parciales[i];
+                DibujarDigito(p_parcial[i], 0, (t / 100) % 10);
+                DibujarDigito(p_parcial[i], 1, (t / 10) % 10);
+                // ILI9341DrawFilledCircle(160, 180, 5, DIGITO_ENCENDIDO_PARCIAL);
+                DibujarDigito(p_parcial[i], 2, t % 10);
+            } else {
+                DibujarDigito(p_parcial[i], 0, 0);
+                DibujarDigito(p_parcial[i], 1, 0);
+                // ILI9341DrawFilledCircle(160, 180, 2, DIGITO_ENCENDIDO_PARCIAL);
+                DibujarDigito(p_parcial[i], 2, 0);
             }
         }
 
-        xSemaphoreGive(ctx->mutex_tiempos);
         vTaskDelayUntil(&last_time, tiempo);
     }
 }
 
-/* === Private variable declarations ================================================================================ */
-
-/* === Private function declarations ================================================================================ */
-
-/* === Public variable definitions ================================================================================== */
-
-/* === Private variable definitions ================================================================================= */
-
-/* === Private function implementation ============================================================================== */
-
-/* === Public function implementation =============================================================================== */
-
 void app_main(void) {
-    static app_data_t ctx = {.cronometro_activo = false, .cuenta_cronometro = 0, .reiniciar_display = false};
+    static app_data_t ctx = {0};
 
     ctx.botones_event = xEventGroupCreate();
     ctx.mutex_tiempos = xSemaphoreCreateMutex();
+    ctx.cola_tiempos_parciales = xQueueCreate(MAX_TIEMPOS_PARCIALES, sizeof(uint16_t));
+
     ILI9341Init();
     ILI9341Rotate(ILI9341_Landscape_1);
 
-    if (init_botones() == ESP_OK) {
-        xTaskCreate(tarea_escaneo_botones, "Escaneo botones", 2048, &ctx, 3, NULL);
-    }
+    init_botones();
+    init_leds();
 
-    else {
-        ESP_LOGE(TAG, "Error al inicializar botones");
-    }
-
-    if (init_leds() == ESP_OK) {
-        xTaskCreate(tarea_leds, "Tarea Leds", 2048, &ctx, 1, NULL);
-    }
-
-    else {
-        ESP_LOGE("LED", "Error al inicializar Leds");
-    }
-
-    xTaskCreate(tarea_eventos_botones, "Eventos botones", 2048, &ctx, 4, NULL);
-
-    panel_t decenas_segundos_inicial =
-        CrearPanel(30, 60, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t unidades_segundos_inicial =
-        CrearPanel(170, 60, 1, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-
-    DibujarDigito(decenas_segundos_inicial, 0, 0);
-    DibujarDigito(decenas_segundos_inicial, 1, 0);
-
-    /*
-    ILI9341DrawFilledCircle(160, 90, 5, DIGITO_ENCENDIDO);
-    ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
-
-    USAR PARA EL RELOJ, Se usa para dibujar los dos puntos que separan las horas de los minutos */
-
-    ILI9341DrawFilledCircle(160, 150, 5, DIGITO_ENCENDIDO);
-
-    DibujarDigito(unidades_segundos_inicial, 0, 0);
-    DibujarDigito(unidades_segundos_inicial, 1, 0);
-
-    xTaskCreate(tarea_display, "Tarea cronómetro", 2048, &ctx, 6, NULL);
+    xTaskCreate(tarea_escaneo_botones, "Escaneo Botones", 2048, &ctx, 3, NULL);
+    xTaskCreate(tarea_eventos_botones, "Eventos Botones", 2048, &ctx, 4, NULL);
+    xTaskCreate(tarea_leds, "Control Leds", 2048, &ctx, 2, NULL);
+    xTaskCreate(tarea_display, "Display Cronometro", 4096, &ctx, 5, NULL);
 }
 
 /* === End of documentation ========================================================================================= */
-
-/** @} End of module definition for doxygen */
