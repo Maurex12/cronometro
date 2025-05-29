@@ -23,7 +23,8 @@
     "editor.formatOnSave": true,
     "files.associations": {
         "freertos.h": "c",
-        "digitos.h": "c"
+        "digitos.h": "c",
+        "array": "c"
     },
     "idf.espIdfPathWin": "c:\\esp32\\v5.1.6\\esp-idf",
     "idf.toolsPathWin": "C:\\esp32\\.espressif",
