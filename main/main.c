@@ -251,8 +251,67 @@ void tarea_eventos_botones(void * pvParameters) {
             xSemaphoreGive(ctx->mutex_tiempos);
         }
 
-        else {
-            ESP_LOGI(TAG, "Modo CONFIGURACIÓN Activo. Eventos de botón ignorados por ahora");
+        else if (ctx->modo_actual == MODO_RELOJ) {
+            xSemaphoreTake(ctx->mutex_tiempos, portMAX_DELAY);
+
+            if (eventos & EVENT_BOTON2) {
+                ctx->campo_activo = (ctx->campo_activo == 0) ? 1 : 0;
+                ESP_LOGI(TAG, "Botón 2: Cambio de campo activo a %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
+            }
+
+            if (eventos & EVENT_BOTON1) {
+                if (ctx->campo_activo == 0) {
+                    // ctx->hora = (ctx->hora + 1) % 24;
+                    ctx->hora++;
+                    if (ctx->hora >= 24) {
+                        ctx->hora = 0;
+                    }
+
+                }
+
+                else {
+                    // ctx->minuto = (ctx->minuto + 1) % 60;
+                    ctx->minuto++;
+                    if (ctx->minuto >= 60) {
+                        ctx->minuto = 0;
+                    }
+                }
+
+                // ctx->reiniciar_display = true;
+                ESP_LOGI(TAG, "Botón 1: Incremento de %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
+            }
+
+            if (eventos & EVENT_BOTON3) {
+                if (ctx->campo_activo == 0) {
+                    // ctx->hora = (ctx->hora == 0) ? 23 : ctx->hora - 1;
+
+                    if (ctx->hora == 0) {
+                        ctx->hora = 23;
+                    }
+
+                    else {
+                        ctx->hora--;
+                    }
+
+                }
+
+                else {
+                    // ctx->minuto = (ctx->minuto == 0) ? 59 : ctx->minuto - 1;
+
+                    if (ctx->minuto == 0) {
+                        ctx->minuto = 59;
+                    }
+
+                    else {
+                        ctx->minuto--;
+                    }
+                }
+
+                // ctx->reiniciar_display = true;
+                ESP_LOGI(TAG, "Botón 3: Decremento de %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
+            }
+
+            xSemaphoreGive(ctx->mutex_tiempos);
         }
     }
 }
@@ -397,15 +456,17 @@ void tarea_display(void * pvParameters) {
 
         else if (ctx->modo_actual == MODO_RELOJ) {
             if (!paneles_reloj_inicializados || ctx->reiniciar_display) {
+
+                if (!paneles_reloj_inicializados) {
+                    panel_horas = CrearPanel(30, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO,
+                                             DIGITO_FONDO);
+                    panel_minutos = CrearPanel(170, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO,
+                                               DIGITO_FONDO);
+
+                    paneles_reloj_inicializados = true;
+                }
+
                 ILI9341Fill(DIGITO_FONDO); // Limpio display
-
-                panel_horas =
-                    CrearPanel(30, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-                panel_minutos =
-                    CrearPanel(170, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-
-                paneles_reloj_inicializados = true;
-
                 ctx->reiniciar_display = false;
 
                 hora_anterior = -1;
@@ -517,7 +578,7 @@ void app_main(void) {
     xTaskCreate(tarea_escaneo_botones, "Escaneo Botones", 2048 * 2, &ctx, 3, NULL);
     xTaskCreate(tarea_eventos_botones, "Eventos Botones", 2048, &ctx, 4, NULL);
     xTaskCreate(tarea_leds, "Control Leds", 2048, &ctx, 2, NULL);
-    xTaskCreate(tarea_display, "Display Cronometro", 4096, &ctx, 5, NULL);
+    xTaskCreate(tarea_display, "Display Cronometro", 8192, &ctx, 5, NULL);
     xTaskCreate(tarea_reloj, "Tarea Reloj", 2048, &ctx, 3, NULL);
 
     /*
