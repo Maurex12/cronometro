@@ -76,8 +76,17 @@ SPDX-License-Identifier: MIT
 #define CUENTA_MAXIMA            600
 #define MAX_TIEMPOS_PARCIALES    2
 
+#define MINUTO_MINIMO            0
 #define MINUTO_MAXIMO            60
+#define HORA_MINIMA              0
 #define HORA_MAXIMA              24
+
+#define DIA_MINIMO               1
+#define DIA_MAXIMO               31
+#define MES_MINIMO               1
+#define MES_MAXIMO               12
+#define ANIO_MINIMO              1989
+#define ANIO_MAXIMO              3000
 
 static const char * TAG = "CRONOMETRO";
 
@@ -114,6 +123,7 @@ typedef struct {
     // Control de panel
     bool paneles_reloj_inicializados;
     bool paneles_fecha_inicializados;
+    bool paneles_alarma_inicializados;
 
     EventGroupHandle_t botones_event;
     QueueHandle_t cola_tiempos_parciales;
@@ -222,6 +232,13 @@ void tarea_eventos_botones(void * pvParameters) {
             }
 
             else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 1) {
+                ctx->etapa_config_actual = 2;
+                ctx->reiniciar_display = true;
+                ctx->paneles_alarma_inicializados = false;
+                ESP_LOGI(TAG, "Cambio a modo RELOJ - ALARMA");
+            }
+
+            else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 2) {
                 ctx->modo_actual = MODO_CRONOMETRO;
                 ctx->reiniciar_display = true;
                 ESP_LOGI(TAG, "Cambio a modo CRONÓMETRO");
@@ -272,8 +289,8 @@ void tarea_eventos_botones(void * pvParameters) {
                     if (ctx->campo_activo == 0) {
 
                         ctx->hora++;
-                        if (ctx->hora >= 24) {
-                            ctx->hora = 0;
+                        if (ctx->hora >= HORA_MAXIMA) {
+                            ctx->hora = HORA_MINIMA;
                         }
 
                     }
@@ -281,8 +298,8 @@ void tarea_eventos_botones(void * pvParameters) {
                     else {
 
                         ctx->minuto++;
-                        if (ctx->minuto >= 60) {
-                            ctx->minuto = 0;
+                        if (ctx->minuto >= MINUTO_MAXIMO) {
+                            ctx->minuto = MINUTO_MINIMO;
                         }
                     }
 
@@ -292,8 +309,8 @@ void tarea_eventos_botones(void * pvParameters) {
                 if (eventos & EVENT_BOTON3) {
                     if (ctx->campo_activo == 0) {
 
-                        if (ctx->hora == 0) {
-                            ctx->hora = 23;
+                        if (ctx->hora == HORA_MINIMA) {
+                            ctx->hora = HORA_MAXIMA - 1;
                         }
 
                         else {
@@ -304,8 +321,8 @@ void tarea_eventos_botones(void * pvParameters) {
 
                     else {
 
-                        if (ctx->minuto == 0) {
-                            ctx->minuto = 59;
+                        if (ctx->minuto == MINUTO_MINIMO) {
+                            ctx->minuto = MINUTO_MAXIMO - 1;
                         }
 
                         else {
@@ -328,16 +345,28 @@ void tarea_eventos_botones(void * pvParameters) {
                 }
 
                 if (eventos & EVENT_BOTON1) {
-                    switch (ctx->campo_activo) {
-                    case 0: // Día
-                        ctx->dia = (ctx->dia % 31) + 1;
-                        break;
-                    case 1: // Mes
-                        ctx->mes = (ctx->mes % 12) + 1;
-                        break;
-                    case 2: // Año
-                        ctx->anio = (ctx->anio == 2099) ? 2000 : ctx->anio + 1;
-                        break;
+                    if (ctx->campo_activo == 0) {
+                        ctx->dia++;
+
+                        if (ctx->dia >= DIA_MAXIMO) {
+                            ctx->dia = DIA_MINIMO;
+                        }
+                    }
+
+                    else if (ctx->campo_activo == 1) {
+                        ctx->mes++;
+
+                        if (ctx->mes >= MES_MAXIMO) {
+                            ctx->mes = MES_MINIMO;
+                        }
+                    }
+
+                    else {
+                        ctx->anio++;
+
+                        if (ctx->anio >= ANIO_MAXIMO) {
+                            ctx->anio = ANIO_MINIMO;
+                        }
                     }
 
                     ESP_LOGI(TAG, "Botón 1: Incremento de %s",
@@ -347,51 +376,124 @@ void tarea_eventos_botones(void * pvParameters) {
                 }
 
                 if (eventos & EVENT_BOTON3) {
-                    switch (ctx->campo_activo) {
-                    case 0: // Día
-                        ctx->dia = (ctx->dia == 1) ? 31 : ctx->dia - 1;
-                        break;
-                    case 1: // Mes
-                        ctx->mes = (ctx->mes == 1) ? 12 : ctx->mes - 1;
-                        break;
-                    case 2: // Año
-                        ctx->anio = (ctx->anio == 2000) ? 2099 : ctx->anio - 1;
-                        break;
+                    if (ctx->campo_activo == 0) {
+                        if (ctx->dia == DIA_MINIMO) {
+                            ctx->dia = DIA_MAXIMO;
+                        }
+
+                        else {
+                            ctx->dia--;
+                        }
                     }
 
-                    ESP_LOGI(TAG, "Botón 3: Decremento de %s",
-                             (ctx->campo_activo == 0)   ? "DIA"
-                             : (ctx->campo_activo == 1) ? "MES"
-                                                        : "AÑO");
+                    else if (ctx->campo_activo == 1) {
+                        if (ctx->mes == MES_MINIMO) {
+                            ctx->mes = MES_MAXIMO;
+                        }
+
+                        else {
+                            ctx->mes--;
+                        }
+                    }
+
+                    else {
+                        if (ctx->anio == ANIO_MINIMO) {
+                            ctx->anio = ANIO_MAXIMO;
+                        }
+
+                        else {
+                            ctx->anio--;
+                        }
+                    }
                 }
+
+                ESP_LOGI(TAG, "Botón 3: Decremento de %s",
+                         (ctx->campo_activo == 0)   ? "DIA"
+                         : (ctx->campo_activo == 1) ? "MES"
+                                                    : "AÑO");
             }
 
-            xSemaphoreGive(ctx->mutex_tiempos);
+            else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 2) {
+                if (eventos & EVENT_BOTON2) {
+                    ctx->campo_activo = (ctx->campo_activo == 0) ? 1 : 0;
+                    ESP_LOGI(TAG, "Botón 2: Cambio de campo activo a %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
+                }
+
+                if (eventos & EVENT_BOTON1) {
+                    if (ctx->campo_activo == 0) {
+
+                        ctx->hora_alarma++;
+                        if (ctx->hora_alarma >= HORA_MAXIMA) {
+                            ctx->hora_alarma = HORA_MINIMA;
+                        }
+
+                    }
+
+                    else {
+
+                        ctx->minuto_alarma++;
+                        if (ctx->minuto_alarma >= MINUTO_MAXIMO) {
+                            ctx->minuto_alarma = MINUTO_MINIMO;
+                        }
+                    }
+
+                    ESP_LOGI(TAG, "Botón 1: Incremento de %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
+                }
+
+                if (eventos & EVENT_BOTON3) {
+                    ctx->alarma_habilitada = !ctx->alarma_habilitada;
+                    ESP_LOGI(TAG, "Botón 3: Alarma %s", ctx->alarma_habilitada ? "ACTIVADA" : "DESACTIVADA");
+
+                    if (!ctx->alarma_habilitada) {
+                        ctx->alarma_sonando = false; // La desactivo si la apagan
+                    }
+                }
+            }
         }
+
+        xSemaphoreGive(ctx->mutex_tiempos);
     }
 }
 
 void tarea_leds(void * pvParameters) {
     app_data_t * ctx = (app_data_t *)pvParameters;
-    bool ultimo_estado = false;
 
     while (1) {
         xSemaphoreTake(ctx->mutex_tiempos, portMAX_DELAY);
-        bool activo = ctx->cronometro_activo;
+        bool alarma_habilitada = ctx->alarma_habilitada;
+        bool alarma_sonando = ctx->alarma_sonando;
+        bool cronometro_activo = ctx->cronometro_activo;
         xSemaphoreGive(ctx->mutex_tiempos);
 
-        if (activo != ultimo_estado) {
-            gpio_set_level(LED_VERDE, activo ? 1 : 0);
-            gpio_set_level(LED_ROJO, activo ? 0 : 1);
-            ultimo_estado = activo;
+        if (alarma_sonando) {
+            // 🔴 Alarma está sonando: rojo parpadea
+            gpio_set_level(LED_VERDE, 0);
+            gpio_set_level(LED_ROJO, 1);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            gpio_set_level(LED_ROJO, 0);
+            vTaskDelay(pdMS_TO_TICKS(250));
         }
 
-        if (activo) {
+        else if (alarma_habilitada) {
+            // 🔴 Alarma habilitada pero aún no suena: rojo fijo
+            gpio_set_level(LED_VERDE, 0);
+            gpio_set_level(LED_ROJO, 1);
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+
+        else if (cronometro_activo) {
+            // ✅ Cronómetro activo: verde parpadea
+            gpio_set_level(LED_ROJO, 0);
+            gpio_set_level(LED_VERDE, 1);
             vTaskDelay(pdMS_TO_TICKS(250));
             gpio_set_level(LED_VERDE, 0);
             vTaskDelay(pdMS_TO_TICKS(250));
-            gpio_set_level(LED_VERDE, 1);
-        } else {
+        }
+
+        else {
+            // ⛔ Nada activo: ambos apagados o rojo encendido si cronómetro detenido
+            gpio_set_level(LED_VERDE, 0);
+            gpio_set_level(LED_ROJO, 1);
             vTaskDelay(pdMS_TO_TICKS(200));
         }
     }
@@ -426,6 +528,11 @@ void tarea_display(void * pvParameters) {
     static panel_t panel_mes;
     static panel_t panel_anio;
 
+    // Paneles para modo alarma
+    static bool paneles_alarma_inicializados = false;
+    static panel_t panel_horas_alarma;
+    static panel_t panel_minutos_alarma;
+
     const TickType_t tiempo = pdMS_TO_TICKS(100);
     TickType_t last_time = xTaskGetTickCount();
 
@@ -442,6 +549,10 @@ void tarea_display(void * pvParameters) {
     int dia_anterior = -1;
     int mes_anterior = -1;
     int anio_anterior = -1;
+
+    // Variables para dibujar Alarma
+    int hora_alarma_anterior = -1;
+    int minuto_alarma_anterior = -1;
 
     while (1) {
         if (ctx->modo_actual == MODO_CRONOMETRO) {
@@ -538,6 +649,14 @@ void tarea_display(void * pvParameters) {
             if (xSemaphoreTake(ctx->mutex_tiempos, pdMS_TO_TICKS(50))) {
                 uint8_t hora = ctx->hora;
                 uint8_t minuto = ctx->minuto;
+
+                // === Lógica para activar la alarma ===
+                if (ctx->alarma_habilitada) {
+                    if (hora == ctx->hora_alarma && minuto == ctx->minuto_alarma) {
+                        ctx->alarma_sonando = true;
+                        ESP_LOGI(TAG, "Alarma Sonando!!!!!!");
+                    }
+                }
                 xSemaphoreGive(ctx->mutex_tiempos);
 
                 if (hora != hora_anterior) {
@@ -607,6 +726,44 @@ void tarea_display(void * pvParameters) {
             }
         }
 
+        else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 2) {
+            if (!paneles_alarma_inicializados || ctx->reiniciar_display) {
+                if (!paneles_alarma_inicializados) {
+                    panel_horas_alarma = CrearPanel(30, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO,
+                                                    DIGITO_APAGADO, DIGITO_FONDO);
+                    panel_minutos_alarma = CrearPanel(170, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO,
+                                                      DIGITO_APAGADO, DIGITO_FONDO);
+                    paneles_alarma_inicializados = true;
+                }
+
+                ILI9341Fill(DIGITO_FONDO);
+                ctx->reiniciar_display = false;
+                hora_alarma_anterior = -1;
+                minuto_alarma_anterior = -1;
+            }
+
+            if (xSemaphoreTake(ctx->mutex_tiempos, pdMS_TO_TICKS(50))) {
+                uint8_t hora_alarma = ctx->hora_alarma;
+                uint8_t minuto_alarma = ctx->minuto_alarma;
+                xSemaphoreGive(ctx->mutex_tiempos);
+
+                if (hora_alarma != hora_alarma_anterior) {
+                    DibujarDigito(panel_horas_alarma, 0, hora_alarma / 10);
+                    DibujarDigito(panel_horas_alarma, 1, hora_alarma % 10);
+                    hora_alarma_anterior = hora_alarma;
+                }
+
+                if (minuto_alarma != minuto_alarma_anterior) {
+                    DibujarDigito(panel_minutos_alarma, 0, minuto_alarma / 10);
+                    DibujarDigito(panel_minutos_alarma, 1, minuto_alarma % 10);
+                    minuto_alarma_anterior = minuto_alarma;
+                }
+
+                ILI9341DrawFilledCircle(160, 90, 5, DIGITO_ENCENDIDO);
+                ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
+            }
+        }
+
         vTaskDelayUntil(&last_time, tiempo);
     }
 }
@@ -623,11 +780,11 @@ void tarea_reloj(void * pvParameters) {
 
         ctx->minuto++;
         if (ctx->minuto >= MINUTO_MAXIMO) {
-            ctx->minuto = 0;
+            ctx->minuto = MINUTO_MINIMO;
             ctx->hora++;
 
             if (ctx->hora >= HORA_MAXIMA) {
-                ctx->hora = 0;
+                ctx->hora = HORA_MINIMA;
             }
         }
 
@@ -648,9 +805,9 @@ void app_main(void) {
     ctx.paneles_reloj_inicializados = false;
 
     // Variables para fecha
-    ctx.dia = 1;
+    ctx.dia = 11;
     ctx.mes = 1;
-    ctx.anio = 2025;
+    ctx.anio = 1989;
     ctx.paneles_fecha_inicializados = false;
 
     // Variables para alarma
