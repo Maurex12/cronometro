@@ -113,6 +113,7 @@ typedef struct {
 
     // Control de panel
     bool paneles_reloj_inicializados;
+    bool paneles_fecha_inicializados;
 
     EventGroupHandle_t botones_event;
     QueueHandle_t cola_tiempos_parciales;
@@ -210,10 +211,17 @@ void tarea_eventos_botones(void * pvParameters) {
                 ctx->campo_activo = 0;
                 ctx->reiniciar_display = true;
                 ctx->paneles_reloj_inicializados = false;
-                ESP_LOGI(TAG, "Cambio a modo RELOJ/CONFIGURACIÓN");
+                ESP_LOGI(TAG, "Cambio a modo RELOJ - HORA");
             }
 
-            else {
+            else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 0) {
+                ctx->etapa_config_actual = 1;
+                ctx->reiniciar_display = true;
+                ctx->paneles_fecha_inicializados = false;
+                ESP_LOGI(TAG, "Cambio a modo RELOJ - FECHA");
+            }
+
+            else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 1) {
                 ctx->modo_actual = MODO_CRONOMETRO;
                 ctx->reiniciar_display = true;
                 ESP_LOGI(TAG, "Cambio a modo CRONÓMETRO");
@@ -254,61 +262,108 @@ void tarea_eventos_botones(void * pvParameters) {
         else if (ctx->modo_actual == MODO_RELOJ) {
             xSemaphoreTake(ctx->mutex_tiempos, portMAX_DELAY);
 
-            if (eventos & EVENT_BOTON2) {
-                ctx->campo_activo = (ctx->campo_activo == 0) ? 1 : 0;
-                ESP_LOGI(TAG, "Botón 2: Cambio de campo activo a %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
-            }
-
-            if (eventos & EVENT_BOTON1) {
-                if (ctx->campo_activo == 0) {
-                    // ctx->hora = (ctx->hora + 1) % 24;
-                    ctx->hora++;
-                    if (ctx->hora >= 24) {
-                        ctx->hora = 0;
-                    }
-
+            if (ctx->etapa_config_actual == 0) {
+                if (eventos & EVENT_BOTON2) {
+                    ctx->campo_activo = (ctx->campo_activo == 0) ? 1 : 0;
+                    ESP_LOGI(TAG, "Botón 2: Cambio de campo activo a %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
                 }
 
-                else {
-                    // ctx->minuto = (ctx->minuto + 1) % 60;
-                    ctx->minuto++;
-                    if (ctx->minuto >= 60) {
-                        ctx->minuto = 0;
-                    }
-                }
+                if (eventos & EVENT_BOTON1) {
+                    if (ctx->campo_activo == 0) {
 
-                // ctx->reiniciar_display = true;
-                ESP_LOGI(TAG, "Botón 1: Incremento de %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
-            }
+                        ctx->hora++;
+                        if (ctx->hora >= 24) {
+                            ctx->hora = 0;
+                        }
 
-            if (eventos & EVENT_BOTON3) {
-                if (ctx->campo_activo == 0) {
-                    // ctx->hora = (ctx->hora == 0) ? 23 : ctx->hora - 1;
-
-                    if (ctx->hora == 0) {
-                        ctx->hora = 23;
                     }
 
                     else {
-                        ctx->hora--;
+
+                        ctx->minuto++;
+                        if (ctx->minuto >= 60) {
+                            ctx->minuto = 0;
+                        }
                     }
 
+                    ESP_LOGI(TAG, "Botón 1: Incremento de %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
                 }
 
-                else {
-                    // ctx->minuto = (ctx->minuto == 0) ? 59 : ctx->minuto - 1;
+                if (eventos & EVENT_BOTON3) {
+                    if (ctx->campo_activo == 0) {
 
-                    if (ctx->minuto == 0) {
-                        ctx->minuto = 59;
+                        if (ctx->hora == 0) {
+                            ctx->hora = 23;
+                        }
+
+                        else {
+                            ctx->hora--;
+                        }
+
                     }
 
                     else {
-                        ctx->minuto--;
+
+                        if (ctx->minuto == 0) {
+                            ctx->minuto = 59;
+                        }
+
+                        else {
+                            ctx->minuto--;
+                        }
                     }
+
+                    ESP_LOGI(TAG, "Botón 3: Decremento de %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
+                }
+            }
+
+            else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 1) {
+
+                if (eventos & EVENT_BOTON2) {
+                    ctx->campo_activo = (ctx->campo_activo + 1) % 3; // Día → Mes → Año → Día...
+                    ESP_LOGI(TAG, "Botón 2: Cambio de campo activo a %s",
+                             (ctx->campo_activo == 0)   ? "DIA"
+                             : (ctx->campo_activo == 1) ? "MES"
+                                                        : "AÑO");
                 }
 
-                // ctx->reiniciar_display = true;
-                ESP_LOGI(TAG, "Botón 3: Decremento de %s", (ctx->campo_activo == 0) ? "HORA" : "MINUTO");
+                if (eventos & EVENT_BOTON1) {
+                    switch (ctx->campo_activo) {
+                    case 0: // Día
+                        ctx->dia = (ctx->dia % 31) + 1;
+                        break;
+                    case 1: // Mes
+                        ctx->mes = (ctx->mes % 12) + 1;
+                        break;
+                    case 2: // Año
+                        ctx->anio = (ctx->anio == 2099) ? 2000 : ctx->anio + 1;
+                        break;
+                    }
+
+                    ESP_LOGI(TAG, "Botón 1: Incremento de %s",
+                             (ctx->campo_activo == 0)   ? "DIA"
+                             : (ctx->campo_activo == 1) ? "MES"
+                                                        : "AÑO");
+                }
+
+                if (eventos & EVENT_BOTON3) {
+                    switch (ctx->campo_activo) {
+                    case 0: // Día
+                        ctx->dia = (ctx->dia == 1) ? 31 : ctx->dia - 1;
+                        break;
+                    case 1: // Mes
+                        ctx->mes = (ctx->mes == 1) ? 12 : ctx->mes - 1;
+                        break;
+                    case 2: // Año
+                        ctx->anio = (ctx->anio == 2000) ? 2099 : ctx->anio - 1;
+                        break;
+                    }
+
+                    ESP_LOGI(TAG, "Botón 3: Decremento de %s",
+                             (ctx->campo_activo == 0)   ? "DIA"
+                             : (ctx->campo_activo == 1) ? "MES"
+                                                        : "AÑO");
+                }
             }
 
             xSemaphoreGive(ctx->mutex_tiempos);
@@ -365,6 +420,12 @@ void tarea_display(void * pvParameters) {
     static panel_t panel_horas;
     static panel_t panel_minutos;
 
+    // Paneles para modo fecha
+    static bool paneles_fecha_inicializados = false;
+    static panel_t panel_dia;
+    static panel_t panel_mes;
+    static panel_t panel_anio;
+
     const TickType_t tiempo = pdMS_TO_TICKS(100);
     TickType_t last_time = xTaskGetTickCount();
 
@@ -377,17 +438,18 @@ void tarea_display(void * pvParameters) {
     int hora_anterior = -1;
     int minuto_anterior = -1;
 
-    while (1) {
-        xSemaphoreTake(ctx->mutex_tiempos, portMAX_DELAY);
+    // Variables para dibujar Fecha
+    int dia_anterior = -1;
+    int mes_anterior = -1;
+    int anio_anterior = -1;
 
+    while (1) {
         if (ctx->modo_actual == MODO_CRONOMETRO) {
             if (ctx->reiniciar_display) {
-                ILI9341Fill(DIGITO_FONDO); // Limpio el display
+                ILI9341Fill(DIGITO_FONDO);
                 DibujarDigito(p_decenas, 0, 0);
                 DibujarDigito(p_unidades, 0, 0);
                 DibujarDigito(p_decimas, 0, 0);
-
-                // ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
                 ILI9341DrawFilledCircle(160, 90, 5, DIGITO_FONDO);
 
                 for (int i = 0; i < MAX_TIEMPOS_PARCIALES; i++) {
@@ -395,6 +457,10 @@ void tarea_display(void * pvParameters) {
                     DibujarDigito(p_parcial[i], 1, 0);
                     DibujarDigito(p_parcial[i], 2, 0);
                 }
+
+                decenas_segundos_anterior = -1;
+                unidades_segundos_anterior = -1;
+                decimas_segundos_anterior = -1;
                 ctx->reiniciar_display = false;
             }
 
@@ -404,38 +470,37 @@ void tarea_display(void * pvParameters) {
                     ctx->cuenta_cronometro = 0;
             }
 
-            uint16_t cuenta = ctx->cuenta_cronometro;
+            if (xSemaphoreTake(ctx->mutex_tiempos, pdMS_TO_TICKS(50))) {
+                uint16_t cuenta = ctx->cuenta_cronometro;
+                xSemaphoreGive(ctx->mutex_tiempos);
 
-            xSemaphoreGive(ctx->mutex_tiempos);
+                int decenas_segundos = (cuenta / 100) % 10;
+                int unidades_segundos = (cuenta / 10) % 10;
+                int decimas_segundos = cuenta % 10;
 
-            int decenas_segundos = (cuenta / 100) % 10;
-            int unidades_segundos = (cuenta / 10) % 10;
-            int decimas_segundos = cuenta % 10;
+                if (decenas_segundos_anterior != decenas_segundos) {
+                    DibujarDigito(p_decenas, 0, decenas_segundos);
+                    decenas_segundos_anterior = decenas_segundos;
+                }
 
-            if (decenas_segundos_anterior != decenas_segundos) {
-                DibujarDigito(p_decenas, 0, decenas_segundos);
-                decenas_segundos_anterior = decenas_segundos;
-            }
+                if (unidades_segundos_anterior != unidades_segundos) {
+                    DibujarDigito(p_unidades, 0, unidades_segundos);
+                    unidades_segundos_anterior = unidades_segundos;
+                }
 
-            if (unidades_segundos_anterior != unidades_segundos) {
-                DibujarDigito(p_unidades, 0, unidades_segundos);
-                unidades_segundos_anterior = unidades_segundos;
-            }
+                ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
 
-            ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
-
-            if (decimas_segundos_anterior != decimas_segundos) {
-                DibujarDigito(p_decimas, 0, decimas_segundos);
-                decimas_segundos_anterior = decimas_segundos;
+                if (decimas_segundos_anterior != decimas_segundos) {
+                    DibujarDigito(p_decimas, 0, decimas_segundos);
+                    decimas_segundos_anterior = decimas_segundos;
+                }
             }
 
             uint16_t tiempos_parciales[MAX_TIEMPOS_PARCIALES] = {0};
             int cantidad = uxQueueMessagesWaiting(ctx->cola_tiempos_parciales);
-
             for (int i = 0; i < cantidad; i++) {
                 xQueueReceive(ctx->cola_tiempos_parciales, &tiempos_parciales[i], 0);
             }
-
             for (int i = 0; i < cantidad; i++) {
                 xQueueSend(ctx->cola_tiempos_parciales, &tiempos_parciales[i], 0);
             }
@@ -454,43 +519,92 @@ void tarea_display(void * pvParameters) {
             }
         }
 
-        else if (ctx->modo_actual == MODO_RELOJ) {
+        else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 0) {
             if (!paneles_reloj_inicializados || ctx->reiniciar_display) {
-
                 if (!paneles_reloj_inicializados) {
                     panel_horas = CrearPanel(30, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO,
                                              DIGITO_FONDO);
                     panel_minutos = CrearPanel(170, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO,
                                                DIGITO_FONDO);
-
                     paneles_reloj_inicializados = true;
                 }
 
-                ILI9341Fill(DIGITO_FONDO); // Limpio display
+                ILI9341Fill(DIGITO_FONDO);
                 ctx->reiniciar_display = false;
-
                 hora_anterior = -1;
                 minuto_anterior = -1;
             }
 
-            uint8_t hora = ctx->hora;
-            uint8_t minuto = ctx->minuto;
-            xSemaphoreGive(ctx->mutex_tiempos);
+            if (xSemaphoreTake(ctx->mutex_tiempos, pdMS_TO_TICKS(50))) {
+                uint8_t hora = ctx->hora;
+                uint8_t minuto = ctx->minuto;
+                xSemaphoreGive(ctx->mutex_tiempos);
 
-            if (hora != hora_anterior) {
-                DibujarDigito(panel_horas, 0, hora / 10);
-                DibujarDigito(panel_horas, 1, hora % 10);
-                hora_anterior = hora;
+                if (hora != hora_anterior) {
+                    DibujarDigito(panel_horas, 0, hora / 10);
+                    DibujarDigito(panel_horas, 1, hora % 10);
+                    hora_anterior = hora;
+                }
+
+                if (minuto != minuto_anterior) {
+                    DibujarDigito(panel_minutos, 0, minuto / 10);
+                    DibujarDigito(panel_minutos, 1, minuto % 10);
+                    minuto_anterior = minuto;
+                }
+
+                ILI9341DrawFilledCircle(160, 90, 5, DIGITO_ENCENDIDO);
+                ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
+            }
+        }
+
+        else if (ctx->modo_actual == MODO_RELOJ && ctx->etapa_config_actual == 1) {
+            if (!paneles_fecha_inicializados || ctx->reiniciar_display) {
+                if (!paneles_fecha_inicializados) {
+                    panel_dia = CrearPanel(10, 40, 2, DIGITO_ALTO / 2, DIGITO_ANCHO / 2, DIGITO_ENCENDIDO,
+                                           DIGITO_APAGADO, DIGITO_FONDO);
+                    panel_mes = CrearPanel(90, 40, 2, DIGITO_ALTO / 2, DIGITO_ANCHO / 2, DIGITO_ENCENDIDO,
+                                           DIGITO_APAGADO, DIGITO_FONDO);
+                    panel_anio = CrearPanel(170, 40, 4, DIGITO_ALTO / 2, DIGITO_ANCHO / 2, DIGITO_ENCENDIDO,
+                                            DIGITO_APAGADO, DIGITO_FONDO);
+                    paneles_fecha_inicializados = true;
+                }
+
+                ILI9341Fill(DIGITO_FONDO);
+                ctx->reiniciar_display = false;
+                dia_anterior = -1;
+                mes_anterior = -1;
+                anio_anterior = -1;
             }
 
-            if (minuto != minuto_anterior) {
-                DibujarDigito(panel_minutos, 0, minuto / 10);
-                DibujarDigito(panel_minutos, 1, minuto % 10);
-                minuto_anterior = minuto;
-            }
+            if (xSemaphoreTake(ctx->mutex_tiempos, pdMS_TO_TICKS(50))) {
+                uint8_t dia = ctx->dia;
+                uint8_t mes = ctx->mes;
+                uint16_t anio = ctx->anio;
+                xSemaphoreGive(ctx->mutex_tiempos);
 
-            ILI9341DrawFilledCircle(160, 90, 5, DIGITO_ENCENDIDO);
-            ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
+                if (dia != dia_anterior) {
+                    DibujarDigito(panel_dia, 0, dia / 10);
+                    DibujarDigito(panel_dia, 1, dia % 10);
+                    dia_anterior = dia;
+                }
+
+                if (mes != mes_anterior) {
+                    DibujarDigito(panel_mes, 0, mes / 10);
+                    DibujarDigito(panel_mes, 1, mes % 10);
+                    mes_anterior = mes;
+                }
+
+                if (anio != anio_anterior) {
+                    DibujarDigito(panel_anio, 0, (anio / 1000) % 10);
+                    DibujarDigito(panel_anio, 1, (anio / 100) % 10);
+                    DibujarDigito(panel_anio, 2, (anio / 10) % 10);
+                    DibujarDigito(panel_anio, 3, anio % 10);
+                    anio_anterior = anio;
+                }
+
+                ILI9341DrawFilledCircle(80, 80, 5, DIGITO_ENCENDIDO);
+                ILI9341DrawFilledCircle(165, 80, 5, DIGITO_ENCENDIDO);
+            }
         }
 
         vTaskDelayUntil(&last_time, tiempo);
@@ -521,32 +635,6 @@ void tarea_reloj(void * pvParameters) {
     }
 }
 
-/*void tarea_display_reloj_test(void * pvParameters) {
-
-    panel_t panel_horas =
-        CrearPanel(30, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t panel_minutos =
-        CrearPanel(170, 40, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-
-    // Reloj por defecto 12:00
-    uint8_t hora = 12;
-    uint8_t minuto = 0;
-
-    ILI9341Fill(DIGITO_FONDO);
-
-    while (1) {
-        DibujarDigito(panel_horas, 0, hora / 10);
-        DibujarDigito(panel_horas, 1, hora % 10);
-        DibujarDigito(panel_minutos, 0, minuto / 10);
-        DibujarDigito(panel_minutos, 1, minuto % 10);
-
-        ILI9341DrawFilledCircle(160, 90, 5, DIGITO_ENCENDIDO);
-        ILI9341DrawFilledCircle(160, 130, 5, DIGITO_ENCENDIDO);
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}*/
-
 void app_main(void) {
     static app_data_t ctx = {0};
 
@@ -562,7 +650,8 @@ void app_main(void) {
     // Variables para fecha
     ctx.dia = 1;
     ctx.mes = 1;
-    ctx.anio = 2024;
+    ctx.anio = 2025;
+    ctx.paneles_fecha_inicializados = false;
 
     // Variables para alarma
     ctx.hora_alarma = 7;
@@ -577,15 +666,10 @@ void app_main(void) {
 
     xTaskCreate(tarea_escaneo_botones, "Escaneo Botones", 2048 * 2, &ctx, 3, NULL);
     xTaskCreate(tarea_eventos_botones, "Eventos Botones", 2048, &ctx, 4, NULL);
-    xTaskCreate(tarea_leds, "Control Leds", 2048, &ctx, 2, NULL);
+    xTaskCreate(tarea_leds, "Control Leds", 2048, &ctx, 5, NULL);
     xTaskCreate(tarea_display, "Display Cronometro", 8192, &ctx, 5, NULL);
     xTaskCreate(tarea_reloj, "Tarea Reloj", 2048, &ctx, 3, NULL);
-
-    /*
-    ILI9341Init();
-    ILI9341Rotate(ILI9341_Landscape_1);
-    xTaskCreate(tarea_display_reloj_test, "Test Reloj", 4096, NULL, 5, NULL);
-    */
 }
 
-/* === End of documentation ========================================================================================= */
+/* === End of documentation
+ * ========================================================================================= */
